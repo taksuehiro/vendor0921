@@ -3,11 +3,13 @@ import re
 import streamlit as st
 from pathlib import Path
 from typing import List, Dict, Optional
+import boto3
+from botocore.exceptions import ClientError, NoCredentialsError
 
 # LangChain imports
-from langchain.document_loaders import TextLoader
+from langchain_community.document_loaders import TextLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.vectorstores import FAISS
+from langchain_community.vectorstores import FAISS
 from langchain.chains import RetrievalQA
 from langchain.schema import Document
 
@@ -22,20 +24,56 @@ CHUNK_SIZE = 800
 CHUNK_OVERLAP = 120
 DEFAULT_TOP_K = 5
 
+def get_aws_identity():
+    """Get AWS caller identity for debugging"""
+    try:
+        sts_client = boto3.client('sts')
+        response = sts_client.get_caller_identity()
+        return {
+            'success': True,
+            'arn': response.get('Arn', 'Unknown'),
+            'user_id': response.get('UserId', 'Unknown'),
+            'account': response.get('Account', 'Unknown')
+        }
+    except NoCredentialsError:
+        return {'success': False, 'error': 'No credentials found'}
+    except ClientError as e:
+        return {'success': False, 'error': f'Client error: {str(e)}'}
+    except Exception as e:
+        return {'success': False, 'error': f'Unexpected error: {str(e)}'}
+
 def get_embeddings():
     """Get AWS Bedrock embeddings instance"""
-    return BedrockEmbeddings(
-        model_id="amazon.titan-embed-text-v1",
-        region_name="us-east-1"
-    )
+    try:
+        return BedrockEmbeddings(
+            model_id="amazon.titan-embed-text-v1",
+            region_name="ap-northeast-1"
+        )
+    except Exception as e:
+        st.error(f"❌ BedrockEmbeddings初期化エラー: {str(e)}")
+        st.error("AWS認証情報が見つかりません（IAMロールが未設定の可能性があります）")
+        st.info("💡 確認事項：")
+        st.info("- IAMロールがアタッチされているか")
+        st.info("- リージョンがap-northeast-1になっているか")
+        st.info("- Bedrockの利用権限があるか")
+        raise
 
 def get_llm():
     """Get AWS Bedrock LLM instance"""
-    return ChatBedrock(
-        model_id="anthropic.claude-v2",
-        region_name="us-east-1",
-        model_kwargs={"temperature": 0}
-    )
+    try:
+        return ChatBedrock(
+            model_id="amazon.titan-text-express-v1",
+            region_name="ap-northeast-1",
+            model_kwargs={"temperature": 0}
+        )
+    except Exception as e:
+        st.error(f"❌ ChatBedrock初期化エラー: {str(e)}")
+        st.error("AWS認証情報が見つかりません（IAMロールが未設定の可能性があります）")
+        st.info("💡 確認事項：")
+        st.info("- IAMロールがアタッチされているか")
+        st.info("- リージョンがap-northeast-1になっているか")
+        st.info("- Bedrockの利用権限があるか")
+        raise
 
 def load_md(md_paths: List[str]) -> List[Document]:
     """Load markdown files and return documents"""
@@ -223,9 +261,20 @@ def main():
             st.write(f"ベクトルストア: {VECTORSTORE_DIR}")
             st.write(f"検索対象ファイル: {MD_PATHS}")
             st.write(f"チャンクサイズ: {CHUNK_SIZE}")
-            st.write("LLM: anthropic.claude-v2")
+            st.write("LLM: amazon.titan-text-express-v1")
             st.write("Embeddings: amazon.titan-embed-text-v1")
-            st.write("リージョン: us-east-1")
+            st.write("リージョン: ap-northeast-1")
+            
+            # AWS認証情報のデバッグ表示
+            st.write("---")
+            st.write("**AWS認証情報:**")
+            identity = get_aws_identity()
+            if identity['success']:
+                st.success(f"✅ Caller ARN: {identity['arn']}")
+                st.write(f"User ID: {identity['user_id']}")
+                st.write(f"Account: {identity['account']}")
+            else:
+                st.error(f"❌ 認証エラー: {identity['error']}")
     
     # Main content
     try:
@@ -272,15 +321,21 @@ def main():
                     
                     except Exception as e:
                         st.error(f"検索エラー: {str(e)}")
-                        st.info("AWS認証情報が正しく設定されているか確認してください（aws configure）")
+                        st.error("AWS認証情報が見つかりません（IAMロールが未設定の可能性があります）")
+                        st.info("💡 確認事項：")
+                        st.info("- IAMロールがアタッチされているか")
+                        st.info("- リージョンがap-northeast-1になっているか")
+                        st.info("- Bedrockの利用権限があるか")
             else:
                 st.warning("質問を入力してください")
     
     except Exception as e:
         st.error(f"アプリケーションエラー: {str(e)}")
-        st.info("AWS認証情報が正しく設定されているか確認してください（aws configure）")
+        st.error("AWS認証情報が見つかりません（IAMロールが未設定の可能性があります）")
+        st.info("💡 確認事項：")
+        st.info("- IAMロールがアタッチされているか")
+        st.info("- リージョンがap-northeast-1になっているか")
+        st.info("- Bedrockの利用権限があるか")
 
 if __name__ == "__main__":
     main()
-#   U p d a t e d   0 9 / 2 1 / 2 0 2 5   1 1 : 5 0 : 4 5  
- 
